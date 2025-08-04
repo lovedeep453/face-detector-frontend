@@ -76,35 +76,69 @@ function App() {
   }
   };
 
-  const handleDetect = async () => {
-  if (!imageUrl) return;
+// In your React component (frontend)
+const handleDetect = async () => {
+  if (!imageUrl) {
+    console.error('No image URL provided');
+    return;
+  }
   try {
-    const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/face-detect`, {
+    const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageUrl })
     });
-    const data = await response.json();
-    const regions = data.results?.[0]?.outputs?.[0]?.data?.regions || [];
-    const boxes = regions.map(r => r.region_info.bounding_box);
-    setFaces(boxes);
-    const entriesRes = await fetch(`${process.env.REACT_APP_BACKEND_URL}/image`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    });
-    const newEntries = await entriesRes.json()
-     setUserState(prev => ({
-      ...prev,
-      user: {
-        ...prev.user,
-        entries: newEntries[0]  // ✅ this must be a number!
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Face detection failed: ${response.status} ${response.statusText}. ${errorText}`);
+    }
+    let result;
+    try {
+      result = await response.json();
+    } catch (jsonError) {
+      throw new Error(`Invalid JSON from face detection API: ${jsonError.message}`);
+    }
+    const { boxes } = result;
+    if (!Array.isArray(boxes)) {
+      console.warn('No bounding boxes returned');
+      setFaces([]);
+    } else {
+      setFaces(boxes);
+    }
+    if (id) {
+      try {
+        const entriesRes = await fetch(`${process.env.REACT_APP_BACKEND_URL}/image`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (!entriesRes.ok) {
+          const errText = await entriesRes.text();
+          throw new Error(`Entries update failed: ${entriesRes.status} ${entriesRes.statusText}. ${errText}`);
+        }
+        const newEntries = await entriesRes.json();
+        if (typeof newEntries === 'number') {
+          setUserState(prev => ({
+            ...prev,
+            user: { ...prev.user, entries: newEntries }
+          }));
+        } else {
+          console.error('Unexpected entries response:', newEntries);
+        }
+      } catch (entriesError) {
+        console.error('Failed to update entries:', entriesError.message);
       }
-    }));
+    }
   } catch (err) {
-    console.error("Face detection failed:", err);
+    if (err.name === 'TypeError' && err.message.includes('fetch')) {
+      console.error('Network error - server may be down:', err.message);
+    } else {
+      console.error('Face detection error:', err.message);
+    }
+    setFaces([]); 
   }
 };
+
 
   useEffect(() => {
     initParticlesEngine(async (engine) => {
